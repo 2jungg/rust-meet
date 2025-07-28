@@ -69,7 +69,7 @@ impl Tui {
     }
 
     pub fn draw_waiting_for_peers(&mut self) -> io::Result<()> {
-        execute!(self.stdout, Clear(ClearType::All), cursor::MoveTo(0, 0))?;
+        execute!(self.stdout, cursor::MoveTo(0, 1))?;
         println!("Waiting for peers to join...\r");
         Ok(())
     }

@@ -5,8 +5,6 @@ use nokhwa::{
 };
 use std::error::Error;
 use image::{DynamicImage, ImageBuffer, Rgb};
-use imageproc::drawing::draw_text_mut;
-use ab_glyph::{FontArc, PxScale};
 use fast_image_resize as fr;
 use std::num::NonZeroU32;
 
@@ -54,30 +52,23 @@ pub fn capture_and_process_frame(camera: &mut Camera) -> Result<String, Box<dyn 
 }
 
 pub fn create_no_camera_frame() -> Result<String, Box<dyn Error>> {
-    let mut image = ImageBuffer::from_pixel(OUTPUT_WIDTH, OUTPUT_HEIGHT, Rgb([0, 0, 0]));
-    let font = FontArc::try_from_slice(include_bytes!("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"))?;
-
-    let height = 20.0;
-    let scale = PxScale {
-        x: height,
-        y: height,
-    };
-
-    let text = "No camera";
-    let x_offset = (OUTPUT_WIDTH / 2) - 40;
-    let y_offset = (OUTPUT_HEIGHT / 2) - 10;
-
-    draw_text_mut(
-        &mut image,
-        Rgb([255, 255, 255]),
-        x_offset as i32,
-        y_offset as i32,
-        scale,
-        &font,
-        text,
-    );
-
-    Ok(to_ascii(&DynamicImage::ImageRgb8(image)))
+    let mut ascii_art = String::new();
+    let no_camera_text = "No camera";
+    let padding = (OUTPUT_WIDTH - no_camera_text.len() as u32) / 2;
+    for y in 0..OUTPUT_HEIGHT {
+        if y == OUTPUT_HEIGHT / 2 {
+            ascii_art.push_str(&" ".repeat(padding as usize));
+            ascii_art.push_str(no_camera_text);
+            ascii_art.push_str(&" ".repeat(padding as usize));
+            if (OUTPUT_WIDTH - no_camera_text.len() as u32) % 2 != 0 {
+                ascii_art.push(' ');
+            }
+        } else {
+            ascii_art.push_str(&" ".repeat(OUTPUT_WIDTH as usize));
+        }
+        ascii_art.push('\n');
+    }
+    Ok(ascii_art)
 }
 
 fn to_ascii(image: &DynamicImage) -> String {
