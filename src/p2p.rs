@@ -22,9 +22,10 @@ pub enum ControlMessage {
     EndCall,
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone, Copy, Debug)]
 pub enum AppStatus {
     WaitingForPeers,
+    Joining,
     InCall,
 }
 
@@ -51,7 +52,7 @@ pub struct AppBehaviour {
 #[derive(Debug)]
 pub enum AppBehaviourEvent {
     Gossipsub(gossipsub::Event),
-    Mdns(mdns::Event),
+    Mdns(()),
 }
 
 impl From<gossipsub::Event> for AppBehaviourEvent {
@@ -61,8 +62,8 @@ impl From<gossipsub::Event> for AppBehaviourEvent {
 }
 
 impl From<mdns::Event> for AppBehaviourEvent {
-    fn from(event: mdns::Event) -> Self {
-        AppBehaviourEvent::Mdns(event)
+    fn from(_: mdns::Event) -> Self {
+        AppBehaviourEvent::Mdns(())
     }
 }
 

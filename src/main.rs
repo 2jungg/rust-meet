@@ -4,7 +4,7 @@ mod audio;
 mod tui;
 
 use clap::Parser;
-use libp2p::{futures::StreamExt, gossipsub::{self, IdentTopic as Topic}, swarm::SwarmEvent, Multiaddr, mdns};
+use libp2p::{futures::StreamExt, gossipsub::{self, IdentTopic as Topic}, swarm::SwarmEvent, Multiaddr, multiaddr::Protocol};
 use std::error::Error;
 use tokio::sync::mpsc;
 
@@ -46,10 +46,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
             (swarm, AppStatus::WaitingForPeers)
         }
         Args::Join { address } => {
-            let mut swarm = p2p::create_swarm(false).await?;
+            let mut swarm = p2p::create_swarm(true).await?;
             let remote_addr: Multiaddr = address.parse()?;
             swarm.dial(remote_addr)?;
-            (swarm, AppStatus::InCall)
+            (swarm, AppStatus::Joining)
         }
     };
 
@@ -57,7 +57,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let video_topic = Topic::new(VIDEO_TOPIC);
     let audio_topic = Topic::new(AUDIO_TOPIC);
-    let local_peer_id = swarm.local_peer_id().to_string();
+    let local_peer_id = *swarm.local_peer_id();
+    let local_peer_id_str = local_peer_id.to_string();
 
     loop {
         if tui.should_quit() {
@@ -70,6 +71,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
             AppStatus::WaitingForPeers => {
                 tui.draw_waiting_for_peers()?;
             }
+            AppStatus::Joining => {
+                tui.draw_joining()?;
+            }
             AppStatus::InCall => {
                 // Process camera frame
                 let frame = if let Some(ref mut cam) = camera {
@@ -80,7 +84,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 };
 
                 let frame_data = FrameData {
-                    peer_id: local_peer_id.clone(),
+                    peer_id: local_peer_id_str.clone(),
                     frame: frame.clone(),
                 };
                 if let Ok(json) = serde_json::to_string(&frame_data) {
@@ -93,10 +97,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
                 // Process audio
                 if let Ok(audio_data) = app_audio_receiver.try_recv() {
-                    let audio_data_p2p = AudioData {
-                        peer_id: local_peer_id.clone(),
-                        data: audio_data,
-                    };
+             let audio_data_p2p = AudioData {
+                peer_id: local_peer_id_str.clone(),
+                data: audio_data,
+            };
                     if let Ok(json) = serde_json::to_string(&audio_data_p2p) {
                         swarm
                             .behaviour_mut()
@@ -111,14 +115,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
         tokio::select! {
             event = swarm.select_next_some() => {
                 match event {
-                    SwarmEvent::Behaviour(AppBehaviourEvent::Mdns(mdns::Event::Discovered(list))) => {
-                        for (peer_id, _multiaddr) in list {
-                            println!("mDNS discovered a new peer: {}", peer_id);
-                            swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
-                        }
-                        if app_status == AppStatus::WaitingForPeers {
-                            app_status = AppStatus::InCall;
-                        }
+                    SwarmEvent::ConnectionEstablished { .. } => {
+                        app_status = AppStatus::InCall;
+                    }
+                    SwarmEvent::Dialing { .. } => {
+                        // Not used in this context
+                    }
+                    SwarmEvent::ConnectionClosed { .. } => {
+                        // Handle disconnection if necessary
+                    }
+                    SwarmEvent::IncomingConnectionError { .. } => {
+                        // Handle error
                     }
                     SwarmEvent::Behaviour(AppBehaviourEvent::Gossipsub(
                         gossipsub::Event::Message { message, .. },
@@ -127,7 +134,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         if topic == VIDEO_TOPIC {
                             if let Ok(frame_data) = serde_json::from_slice::<FrameData>(&message.data)
                             {
-                                if frame_data.peer_id != local_peer_id {
+                                if frame_data.peer_id != local_peer_id_str {
                                     tui.update_frame(frame_data);
                                 }
                             }
@@ -135,7 +142,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             if let Ok(audio_data) =
                                 serde_json::from_slice::<AudioData>(&message.data)
                             {
-                                if audio_data.peer_id != local_peer_id {
+                                if audio_data.peer_id != local_peer_id_str {
                                     let _ = app_audio_sender.send(audio_data.data);
                                 }
                             }
@@ -150,7 +157,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         }
                     }
                     SwarmEvent::NewListenAddr { address, .. } => {
-                        println!("Listening on: {}/p2p/{}", address, local_peer_id);
+                        println!("Listening on: {}", address.with(Protocol::P2p(local_peer_id)));
                     }
                     _ => {}
                 }

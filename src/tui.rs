@@ -73,6 +73,12 @@ impl Tui {
         println!("Waiting for peers to join...\r");
         Ok(())
     }
+
+    pub fn draw_joining(&mut self) -> io::Result<()> {
+        execute!(self.stdout, Clear(ClearType::All), cursor::MoveTo(0, 0))?;
+        println!("Joining room...\r");
+        Ok(())
+    }
 }
 
 impl Drop for Tui {
