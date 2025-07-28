@@ -1,14 +1,20 @@
-mod p2p;
-mod video;
 mod audio;
+mod p2p;
 mod tui;
+mod video;
 
 use clap::Parser;
-use libp2p::{futures::StreamExt, gossipsub::{self, IdentTopic as Topic}, swarm::SwarmEvent, Multiaddr, multiaddr::Protocol};
+use libp2p::{
+    futures::StreamExt,
+    gossipsub::{self, IdentTopic as Topic},
+    multiaddr::Protocol,
+    swarm::SwarmEvent,
+    Multiaddr,
+};
 use std::error::Error;
 use tokio::sync::mpsc;
 
-use p2p::{FrameData, AudioData, VIDEO_TOPIC, AUDIO_TOPIC, AppBehaviourEvent};
+use p2p::{AppBehaviourEvent, AudioData, FrameData, AUDIO_TOPIC, VIDEO_TOPIC};
 use tui::Tui;
 
 use p2p::AppStatus;
@@ -97,10 +103,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
                 // Process audio
                 if let Ok(audio_data) = app_audio_receiver.try_recv() {
-             let audio_data_p2p = AudioData {
-                peer_id: local_peer_id_str.clone(),
-                data: audio_data,
-            };
+                    let audio_data_p2p = AudioData {
+                        peer_id: local_peer_id_str.clone(),
+                        data: audio_data,
+                    };
                     if let Ok(json) = serde_json::to_string(&audio_data_p2p) {
                         swarm
                             .behaviour_mut()

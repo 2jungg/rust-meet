@@ -1,14 +1,8 @@
 use libp2p::{
     gossipsub::{self, IdentTopic as Topic, MessageAuthenticity},
-    identity,
-    mdns,
-    noise,
+    identity, mdns, noise,
     swarm::{behaviour::toggle::Toggle, NetworkBehaviour},
-    tcp,
-    yamux,
-    PeerId,
-    Swarm,
-    SwarmBuilder,
+    tcp, yamux, PeerId, Swarm, SwarmBuilder,
 };
 use serde::{Deserialize, Serialize};
 use std::error::Error;
@@ -73,8 +67,6 @@ pub async fn create_swarm(use_mdns: bool) -> Result<Swarm<AppBehaviour>, Box<dyn
     let local_peer_id = PeerId::from(local_key.public());
     println!("Local peer id: {}", local_peer_id);
 
-    
-
     // Create a Gossipsub topic
     let video_topic = Topic::new(VIDEO_TOPIC);
     let audio_topic = Topic::new(AUDIO_TOPIC);
@@ -83,15 +75,21 @@ pub async fn create_swarm(use_mdns: bool) -> Result<Swarm<AppBehaviour>, Box<dyn
     // Create a Swarm to manage peers and events
     let swarm = {
         let gossipsub_config = gossipsub::Config::default();
-        let mut gossipsub: gossipsub::Behaviour =
-            gossipsub::Behaviour::new(MessageAuthenticity::Signed(local_key.clone()), gossipsub_config)
-                .map_err(|msg| std::io::Error::new(std::io::ErrorKind::Other, msg))?;
+        let mut gossipsub: gossipsub::Behaviour = gossipsub::Behaviour::new(
+            MessageAuthenticity::Signed(local_key.clone()),
+            gossipsub_config,
+        )
+        .map_err(|msg| std::io::Error::new(std::io::ErrorKind::Other, msg))?;
         gossipsub.subscribe(&video_topic)?;
         gossipsub.subscribe(&audio_topic)?;
         gossipsub.subscribe(&control_topic)?;
 
         let mdns = if use_mdns {
-            Some(mdns::tokio::Behaviour::new(mdns::Config::default(), local_peer_id)?).into()
+            Some(mdns::tokio::Behaviour::new(
+                mdns::Config::default(),
+                local_peer_id,
+            )?)
+            .into()
         } else {
             None.into()
         };
@@ -106,7 +104,9 @@ pub async fn create_swarm(use_mdns: bool) -> Result<Swarm<AppBehaviour>, Box<dyn
                 yamux::Config::default,
             )?
             .with_behaviour(|_key| behaviour)?
-            .with_swarm_config(|c| c.with_idle_connection_timeout(std::time::Duration::from_secs(60)))
+            .with_swarm_config(|c| {
+                c.with_idle_connection_timeout(std::time::Duration::from_secs(60))
+            })
             .build()
     };
 
