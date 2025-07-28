@@ -1,15 +1,28 @@
 use crate::p2p::FrameData;
-use crate::video;
 use crossterm::{
-    cursor, execute,
-    terminal::{self, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen},
+    event::{DisableMouseCapture, EnableMouseCapture},
+    execute,
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use libp2p::Multiaddr;
-use std::collections::HashMap;
-use std::io::{self, Stdout};
+use ratatui::{
+    prelude::*,
+    widgets::{Block, Borders, Paragraph},
+};
+use std::{
+    collections::HashMap,
+    io::{self, Stdout},
+};
+
+type Terminal = ratatui::Terminal<CrosstermBackend<Stdout>>;
+
+fn draw_ui(frame: &mut Frame, content: impl Widget) {
+    let size = frame.size();
+    frame.render_widget(content, size);
+}
 
 pub struct Tui {
-    stdout: Stdout,
+    terminal: Terminal,
     remote_frames: HashMap<String, String>,
     listen_addresses: Vec<Multiaddr>,
 }
@@ -17,10 +30,12 @@ pub struct Tui {
 impl Tui {
     pub fn new() -> io::Result<Self> {
         let mut stdout = io::stdout();
-        terminal::enable_raw_mode()?;
-        execute!(stdout, EnterAlternateScreen, cursor::Hide)?;
+        enable_raw_mode()?;
+        execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+        let backend = CrosstermBackend::new(stdout);
+        let terminal = ratatui::Terminal::new(backend)?;
         Ok(Self {
-            stdout,
+            terminal,
             remote_frames: HashMap::new(),
             listen_addresses: Vec::new(),
         })
@@ -36,46 +51,85 @@ impl Tui {
     }
 
     pub fn draw(&mut self, self_frame: &str) -> io::Result<()> {
-        execute!(self.stdout, Clear(ClearType::All), cursor::MoveTo(0, 0))?;
+        let Tui {
+            terminal,
+            remote_frames,
+            ..
+        } = self;
+        terminal.draw(|f| {
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Percentage(50), Constraint::Percentage(50)].as_ref())
+                .split(f.size());
 
-        // Draw self frame
-        execute!(self.stdout, cursor::MoveTo(0, 0))?;
-        println!("My View (Press 'q' to quit):\r");
-        println!("{}\r", self_frame);
+            let self_view = Paragraph::new(self_frame).block(
+                Block::default()
+                    .title("My View (Press 'q' to quit)")
+                    .borders(Borders::ALL),
+            );
+            f.render_widget(self_view, chunks[0]);
 
-        // Draw remote frames
-        let mut y_offset = 2 + video::OUTPUT_HEIGHT as u16;
-        for (peer_id, frame) in &self.remote_frames {
-            execute!(self.stdout, cursor::MoveTo(0, y_offset))?;
-            println!("Peer: {}\r", peer_id);
-            println!("{}\r", frame);
-            y_offset += 2 + video::OUTPUT_HEIGHT as u16;
-        }
-
+            if !remote_frames.is_empty() {
+                let remote_frame_text = remote_frames.values().next().unwrap().clone();
+                let remote_peer_id = remote_frames.keys().next().unwrap().clone();
+                let remote_view = Paragraph::new(remote_frame_text).block(
+                    Block::default()
+                        .title(format!("Peer: {}", remote_peer_id))
+                        .borders(Borders::ALL),
+                );
+                f.render_widget(remote_view, chunks[1]);
+            } else {
+                let remote_view = Paragraph::new("Waiting for remote frame...")
+                    .block(Block::default().title("Remote View").borders(Borders::ALL));
+                f.render_widget(remote_view, chunks[1]);
+            }
+        })?;
         Ok(())
     }
 
     pub fn draw_waiting_for_peers(&mut self, local_peer_id: &str) -> io::Result<()> {
-        execute!(self.stdout, Clear(ClearType::All), cursor::MoveTo(0, 0))?;
-        println!("Waiting for peers to join...\r");
-        println!("Your Peer ID: {}\r", local_peer_id);
-        println!("Listening on:\r");
-        for addr in &self.listen_addresses {
-            println!("  {}\r", addr);
-        }
+        let Tui {
+            terminal,
+            listen_addresses,
+            ..
+        } = self;
+        let listen_addresses_str = listen_addresses
+            .iter()
+            .map(|addr| format!("  {}", addr))
+            .collect::<Vec<_>>()
+            .join("\n");
+        terminal.draw(|f| {
+            let text = format!(
+                "Waiting for peers to join...\n\nYour Peer ID: {}\n\nListening on:\n{}",
+                local_peer_id, listen_addresses_str
+            );
+            let paragraph =
+                Paragraph::new(text).block(Block::default().title("Status").borders(Borders::ALL));
+            draw_ui(f, paragraph);
+        })?;
         Ok(())
     }
 
     pub fn draw_joining(&mut self) -> io::Result<()> {
-        execute!(self.stdout, Clear(ClearType::All), cursor::MoveTo(0, 0))?;
-        println!("Joining room...\r");
+        let Tui { terminal, .. } = self;
+        terminal.draw(|f| {
+            let paragraph = Paragraph::new("Joining room...")
+                .block(Block::default().title("Status").borders(Borders::ALL));
+            draw_ui(f, paragraph);
+        })?;
         Ok(())
     }
 }
 
 impl Drop for Tui {
     fn drop(&mut self) {
-        execute!(self.stdout, LeaveAlternateScreen, cursor::Show).unwrap();
-        terminal::disable_raw_mode().unwrap();
+        disable_raw_mode().unwrap();
+        execute!(
+            self.terminal.backend_mut(),
+            LeaveAlternateScreen,
+            DisableMouseCapture
+        )
+        .unwrap();
+        self.terminal.show_cursor().unwrap();
     }
 }
