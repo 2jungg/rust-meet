@@ -7,7 +7,7 @@ use crossterm::{
 use std::collections::HashMap;
 use std::io::{self, Stdout};
 use std::time::Duration;
-use crate::p2p::FrameData;
+use crate::p2p::{FrameData, AppStatus};
 use crate::video;
 
 pub struct Tui {
@@ -28,7 +28,7 @@ impl Tui {
         })
     }
 
-    pub fn handle_events(&mut self) -> io::Result<()> {
+    pub fn handle_events(&mut self, _app_status: &mut AppStatus) -> io::Result<()> {
         if event::poll(Duration::from_millis(100))? {
             if let Event::Key(key) = event::read()? {
                 if key.code == KeyCode::Char('q') {
@@ -65,6 +65,12 @@ impl Tui {
             y_offset += 2 + video::OUTPUT_HEIGHT as u16;
         }
 
+        Ok(())
+    }
+
+    pub fn draw_waiting_for_peers(&mut self) -> io::Result<()> {
+        execute!(self.stdout, Clear(ClearType::All), cursor::MoveTo(0, 0))?;
+        println!("Waiting for peers to join...\r");
         Ok(())
     }
 }

@@ -3,19 +3,30 @@ use libp2p::{
     identity,
     mdns,
     noise,
-    swarm::NetworkBehaviour,
+    swarm::{behaviour::toggle::Toggle, NetworkBehaviour},
     tcp,
     yamux,
     PeerId,
     Swarm,
     SwarmBuilder,
-    
 };
 use serde::{Deserialize, Serialize};
 use std::error::Error;
 
 pub const VIDEO_TOPIC: &str = "video";
 pub const AUDIO_TOPIC: &str = "audio";
+pub const CONTROL_TOPIC: &str = "control";
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub enum ControlMessage {
+    EndCall,
+}
+
+#[derive(PartialEq)]
+pub enum AppStatus {
+    WaitingForPeers,
+    InCall,
+}
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct FrameData {
@@ -34,7 +45,7 @@ pub struct AudioData {
 #[behaviour(out_event = "AppBehaviourEvent")]
 pub struct AppBehaviour {
     pub gossipsub: gossipsub::Behaviour,
-    pub mdns: mdns::tokio::Behaviour,
+    pub mdns: Toggle<mdns::tokio::Behaviour>,
 }
 
 #[derive(Debug)]
@@ -55,7 +66,7 @@ impl From<mdns::Event> for AppBehaviourEvent {
     }
 }
 
-pub async fn create_swarm() -> Result<Swarm<AppBehaviour>, Box<dyn Error>> {
+pub async fn create_swarm(use_mdns: bool) -> Result<Swarm<AppBehaviour>, Box<dyn Error>> {
     // Create a random PeerId
     let local_key = identity::Keypair::generate_ed25519();
     let local_peer_id = PeerId::from(local_key.public());
@@ -66,6 +77,7 @@ pub async fn create_swarm() -> Result<Swarm<AppBehaviour>, Box<dyn Error>> {
     // Create a Gossipsub topic
     let video_topic = Topic::new(VIDEO_TOPIC);
     let audio_topic = Topic::new(AUDIO_TOPIC);
+    let control_topic = Topic::new(CONTROL_TOPIC);
 
     // Create a Swarm to manage peers and events
     let swarm = {
@@ -75,9 +87,16 @@ pub async fn create_swarm() -> Result<Swarm<AppBehaviour>, Box<dyn Error>> {
                 .map_err(|msg| std::io::Error::new(std::io::ErrorKind::Other, msg))?;
         gossipsub.subscribe(&video_topic)?;
         gossipsub.subscribe(&audio_topic)?;
+        gossipsub.subscribe(&control_topic)?;
 
-        let mdns = mdns::tokio::Behaviour::new(mdns::Config::default(), local_peer_id)?;
+        let mdns = if use_mdns {
+            Some(mdns::tokio::Behaviour::new(mdns::Config::default(), local_peer_id)?).into()
+        } else {
+            None.into()
+        };
+
         let behaviour = AppBehaviour { gossipsub, mdns };
+
         SwarmBuilder::with_existing_identity(local_key)
             .with_tokio()
             .with_tcp(
@@ -91,4 +110,14 @@ pub async fn create_swarm() -> Result<Swarm<AppBehaviour>, Box<dyn Error>> {
     };
 
     Ok(swarm)
+}
+
+pub fn end_call(swarm: &mut Swarm<AppBehaviour>) -> Result<(), Box<dyn Error>> {
+    let control_topic = Topic::new(CONTROL_TOPIC);
+    let message = serde_json::to_string(&ControlMessage::EndCall)?;
+    swarm
+        .behaviour_mut()
+        .gossipsub
+        .publish(control_topic, message.as_bytes())?;
+    Ok(())
 }

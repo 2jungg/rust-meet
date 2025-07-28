@@ -4,7 +4,9 @@ use nokhwa::{
     Camera,
 };
 use std::error::Error;
-use image::{DynamicImage, ImageBuffer, Rgb, GenericImageView};
+use image::{DynamicImage, ImageBuffer, Rgb};
+use imageproc::drawing::draw_text_mut;
+use ab_glyph::{FontArc, PxScale};
 use fast_image_resize as fr;
 use std::num::NonZeroU32;
 
@@ -25,11 +27,6 @@ pub fn capture_and_process_frame(camera: &mut Camera) -> Result<String, Box<dyn 
     let decoded = frame.decode_image::<RgbFormat>()?;
 
     let original_image = DynamicImage::ImageRgb8(decoded);
-    let width = NonZeroU32::new(OUTPUT_WIDTH).unwrap();
-    let height = NonZeroU32::new(OUTPUT_HEIGHT).unwrap();
-    
-    let mut resize_alg = fr::Resizer::new(fr::ResizeAlg::Nearest);
-    let mut resized_image = fr::Image::new(width, height, fr::PixelType::U8x3);
     let src_image = fr::Image::from_vec_u8(
         NonZeroU32::new(original_image.width()).unwrap(),
         NonZeroU32::new(original_image.height()).unwrap(),
@@ -49,11 +46,38 @@ pub fn capture_and_process_frame(camera: &mut Camera) -> Result<String, Box<dyn 
     let image_buffer: ImageBuffer<Rgb<u8>, Vec<u8>> = ImageBuffer::from_vec(
         OUTPUT_WIDTH,
         OUTPUT_HEIGHT,
-        resized_image.buffer().to_vec(),
+        dst_image.buffer().to_vec(),
     )
     .ok_or("Failed to create image buffer")?;
 
     Ok(to_ascii(&DynamicImage::ImageRgb8(image_buffer)))
+}
+
+pub fn create_no_camera_frame() -> Result<String, Box<dyn Error>> {
+    let mut image = ImageBuffer::from_pixel(OUTPUT_WIDTH, OUTPUT_HEIGHT, Rgb([0, 0, 0]));
+    let font = FontArc::try_from_slice(include_bytes!("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"))?;
+
+    let height = 20.0;
+    let scale = PxScale {
+        x: height,
+        y: height,
+    };
+
+    let text = "No camera";
+    let x_offset = (OUTPUT_WIDTH / 2) - 40;
+    let y_offset = (OUTPUT_HEIGHT / 2) - 10;
+
+    draw_text_mut(
+        &mut image,
+        Rgb([255, 255, 255]),
+        x_offset as i32,
+        y_offset as i32,
+        scale,
+        &font,
+        text,
+    );
+
+    Ok(to_ascii(&DynamicImage::ImageRgb8(image)))
 }
 
 fn to_ascii(image: &DynamicImage) -> String {
