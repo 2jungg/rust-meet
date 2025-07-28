@@ -1,11 +1,13 @@
+use fast_image_resize as fr;
+use image::{DynamicImage, ImageBuffer, Rgb};
 use nokhwa::{
     pixel_format::RgbFormat,
-    utils::{CameraIndex, RequestedFormat, RequestedFormatType},
+    utils::{
+        CameraFormat, CameraIndex, FrameFormat, RequestedFormat, RequestedFormatType, Resolution,
+    },
     Camera,
 };
 use std::error::Error;
-use image::{DynamicImage, ImageBuffer, Rgb};
-use fast_image_resize as fr;
 use std::num::NonZeroU32;
 
 pub const ASCII_CHARS: &[char] = &[' ', '.', ':', '-', '=', '+', '*', '#', '%', '@'];
@@ -14,8 +16,9 @@ pub const OUTPUT_HEIGHT: u32 = 40;
 
 pub fn initialize_camera() -> Result<Camera, Box<dyn Error>> {
     let index = CameraIndex::Index(0);
-    let requested =
-        RequestedFormat::new::<RgbFormat>(RequestedFormatType::AbsoluteHighestFrameRate);
+    let requested = RequestedFormat::new::<RgbFormat>(RequestedFormatType::Closest(
+        CameraFormat::new(Resolution::new(640, 480), FrameFormat::MJPEG, 30),
+    ));
     let camera = Camera::new(index, requested)?;
     Ok(camera)
 }
@@ -41,12 +44,9 @@ pub fn capture_and_process_frame(camera: &mut Camera) -> Result<String, Box<dyn 
     let mut resizer = fr::Resizer::new(fr::ResizeAlg::Nearest);
     resizer.resize(&src_image.view(), &mut dst_image.view_mut())?;
 
-    let image_buffer: ImageBuffer<Rgb<u8>, Vec<u8>> = ImageBuffer::from_vec(
-        OUTPUT_WIDTH,
-        OUTPUT_HEIGHT,
-        dst_image.buffer().to_vec(),
-    )
-    .ok_or("Failed to create image buffer")?;
+    let image_buffer: ImageBuffer<Rgb<u8>, Vec<u8>> =
+        ImageBuffer::from_vec(OUTPUT_WIDTH, OUTPUT_HEIGHT, dst_image.buffer().to_vec())
+            .ok_or("Failed to create image buffer")?;
 
     Ok(to_ascii(&DynamicImage::ImageRgb8(image_buffer)))
 }
