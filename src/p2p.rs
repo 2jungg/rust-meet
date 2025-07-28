@@ -37,7 +37,7 @@ pub struct AudioData {
 
 // The network behaviour combines multiple protocols.
 #[derive(NetworkBehaviour)]
-#[behaviour(out_event = "AppBehaviourEvent")]
+#[behaviour(to_swarm = "AppBehaviourEvent")]
 pub struct AppBehaviour {
     pub gossipsub: gossipsub::Behaviour,
     pub mdns: Toggle<mdns::tokio::Behaviour>,

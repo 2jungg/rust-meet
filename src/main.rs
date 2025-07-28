@@ -4,6 +4,7 @@ mod tui;
 mod video;
 
 use clap::Parser;
+use crossterm::event::{self, Event, KeyCode};
 use libp2p::{
     futures::StreamExt,
     gossipsub::{self, IdentTopic as Topic},
@@ -12,7 +13,8 @@ use libp2p::{
     Multiaddr,
 };
 use std::error::Error;
-use tokio::sync::mpsc;
+use std::thread;
+use tokio::{sync::mpsc, time::Duration};
 
 use p2p::{AppBehaviourEvent, AudioData, FrameData, AUDIO_TOPIC, VIDEO_TOPIC};
 use tui::Tui;
@@ -66,63 +68,95 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let local_peer_id = *swarm.local_peer_id();
     let local_peer_id_str = local_peer_id.to_string();
 
-    loop {
-        if tui.should_quit() {
-            p2p::end_call(&mut swarm)?;
-            break;
-        }
-        tui.handle_events(&mut app_status)?;
+    let mut tick_interval = tokio::time::interval(Duration::from_millis(50));
+    let (key_sender, mut key_receiver) = mpsc::unbounded_channel();
+    let mut tui_dirty = true;
 
-        match app_status {
-            AppStatus::WaitingForPeers => {
-                tui.draw_waiting_for_peers()?;
-            }
-            AppStatus::Joining => {
-                tui.draw_joining()?;
-            }
-            AppStatus::InCall => {
-                // Process camera frame
-                let frame = if let Some(ref mut cam) = camera {
-                    video::capture_and_process_frame(cam)
-                        .unwrap_or_else(|_| video::create_no_camera_frame().unwrap())
-                } else {
-                    video::create_no_camera_frame().unwrap()
-                };
-
-                let frame_data = FrameData {
-                    peer_id: local_peer_id_str.clone(),
-                    frame: frame.clone(),
-                };
-                if let Ok(json) = serde_json::to_string(&frame_data) {
-                    swarm
-                        .behaviour_mut()
-                        .gossipsub
-                        .publish(video_topic.clone(), json.as_bytes())?;
-                }
-                tui.draw(&frame)?;
-
-                // Process audio
-                if let Ok(audio_data) = app_audio_receiver.try_recv() {
-                    let audio_data_p2p = AudioData {
-                        peer_id: local_peer_id_str.clone(),
-                        data: audio_data,
-                    };
-                    if let Ok(json) = serde_json::to_string(&audio_data_p2p) {
-                        swarm
-                            .behaviour_mut()
-                            .gossipsub
-                            .publish(audio_topic.clone(), json.as_bytes())?;
+    thread::spawn(move || {
+        loop {
+            match event::read() {
+                Ok(event) => {
+                    if key_sender.send(event).is_err() {
+                        // rx closed
+                        break;
                     }
                 }
+                Err(_) => break,
             }
         }
+    });
 
-        // Handle network events
+    loop {
+        if tui_dirty {
+            match app_status {
+                AppStatus::WaitingForPeers => {
+                    tui.draw_waiting_for_peers(&local_peer_id_str)?;
+                }
+                AppStatus::Joining => {
+                    tui.draw_joining()?;
+                }
+                AppStatus::InCall => {
+                    // InCall is handled by the tick interval
+                }
+            }
+            tui_dirty = false;
+        }
+
         tokio::select! {
+            _ = tick_interval.tick() => {
+                if app_status == AppStatus::InCall {
+                    // Process camera frame
+                    let frame = if let Some(ref mut cam) = camera {
+                        video::capture_and_process_frame(cam)
+                            .unwrap_or_else(|_| video::create_no_camera_frame().unwrap())
+                    } else {
+                        video::create_no_camera_frame().unwrap()
+                    };
+
+                    let frame_data = FrameData {
+                        peer_id: local_peer_id_str.clone(),
+                        frame: frame.clone(),
+                    };
+                    if let Ok(json) = serde_json::to_string(&frame_data) {
+                        if let Err(_e) = swarm
+                            .behaviour_mut()
+                            .gossipsub
+                            .publish(video_topic.clone(), json.as_bytes()) {
+                        }
+                    }
+
+                    // Process audio
+                    if let Ok(audio_data) = app_audio_receiver.try_recv() {
+                        let audio_data_p2p = AudioData {
+                            peer_id: local_peer_id_str.clone(),
+                            data: audio_data,
+                        };
+                        if let Ok(json) = serde_json::to_string(&audio_data_p2p) {
+                            if let Err(_e) = swarm
+                                .behaviour_mut()
+                                .gossipsub
+                                .publish(audio_topic.clone(), json.as_bytes()) {
+                            }
+                        }
+                    }
+                    tui.draw(&frame)?;
+                }
+            },
+            key_event = key_receiver.recv() => {
+                match key_event {
+                    Some(Event::Key(key)) if key.code == KeyCode::Char('q') => {
+                        p2p::end_call(&mut swarm)?;
+                        break;
+                    }
+                    Some(_) => {}
+                    None => break,
+                }
+            },
             event = swarm.select_next_some() => {
                 match event {
                     SwarmEvent::ConnectionEstablished { .. } => {
                         app_status = AppStatus::InCall;
+                        tui_dirty = true;
                     }
                     SwarmEvent::Dialing { .. } => {
                         // Not used in this context
@@ -142,6 +176,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             {
                                 if frame_data.peer_id != local_peer_id_str {
                                     tui.update_frame(frame_data);
+                                    tui_dirty = true;
                                 }
                             }
                         } else if topic == AUDIO_TOPIC {
@@ -163,7 +198,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         }
                     }
                     SwarmEvent::NewListenAddr { address, .. } => {
-                        println!("Listening on: {}", address.with(Protocol::P2p(local_peer_id)));
+                        let listen_addr = address.with(Protocol::P2p(local_peer_id));
+                        tui.add_listen_address(listen_addr);
+                        tui_dirty = true;
                     }
                     _ => {}
                 }

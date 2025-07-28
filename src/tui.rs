@@ -1,19 +1,17 @@
+use crate::p2p::FrameData;
+use crate::video;
 use crossterm::{
-    cursor,
-    event::{self, Event, KeyCode},
-    execute,
+    cursor, execute,
     terminal::{self, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen},
 };
+use libp2p::Multiaddr;
 use std::collections::HashMap;
 use std::io::{self, Stdout};
-use std::time::Duration;
-use crate::p2p::{FrameData, AppStatus};
-use crate::video;
 
 pub struct Tui {
     stdout: Stdout,
-    should_quit: bool,
     remote_frames: HashMap<String, String>,
+    listen_addresses: Vec<Multiaddr>,
 }
 
 impl Tui {
@@ -23,24 +21,13 @@ impl Tui {
         execute!(stdout, EnterAlternateScreen, cursor::Hide)?;
         Ok(Self {
             stdout,
-            should_quit: false,
             remote_frames: HashMap::new(),
+            listen_addresses: Vec::new(),
         })
     }
 
-    pub fn handle_events(&mut self, _app_status: &mut AppStatus) -> io::Result<()> {
-        if event::poll(Duration::from_millis(100))? {
-            if let Event::Key(key) = event::read()? {
-                if key.code == KeyCode::Char('q') {
-                    self.should_quit = true;
-                }
-            }
-        }
-        Ok(())
-    }
-
-    pub fn should_quit(&self) -> bool {
-        self.should_quit
+    pub fn add_listen_address(&mut self, addr: Multiaddr) {
+        self.listen_addresses.push(addr);
     }
 
     pub fn update_frame(&mut self, frame_data: FrameData) {
@@ -68,9 +55,14 @@ impl Tui {
         Ok(())
     }
 
-    pub fn draw_waiting_for_peers(&mut self) -> io::Result<()> {
-        execute!(self.stdout, cursor::MoveTo(0, 1))?;
+    pub fn draw_waiting_for_peers(&mut self, local_peer_id: &str) -> io::Result<()> {
+        execute!(self.stdout, Clear(ClearType::All), cursor::MoveTo(0, 0))?;
         println!("Waiting for peers to join...\r");
+        println!("Your Peer ID: {}\r", local_peer_id);
+        println!("Listening on:\r");
+        for addr in &self.listen_addresses {
+            println!("  {}\r", addr);
+        }
         Ok(())
     }
 
