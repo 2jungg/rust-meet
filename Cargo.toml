@@ -1,12 +1,20 @@
 [package]
 name = "rust-meet"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
-libp2p = { version = "0.53", features = ["tokio", "gossipsub", "mdns", "noise", "tcp", "yamux", "macros"] }
-nokhwa = { version = "0.10", features = ["input-v4l", "output-threaded"] }
+libp2p = { version = "0.52", features = [
+    "tokio",
+    "gossipsub",
+    "mdns",
+    "noise",
+    "tcp",
+    "yamux",
+    "macros",
+] }
+nokhwa = { version = "0.10", features = ["input-msmf", "output-threaded"] }
 cpal = "0.15"
 image = "0.25"
 fast_image_resize = "2.7"
