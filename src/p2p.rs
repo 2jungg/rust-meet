@@ -93,7 +93,10 @@ pub async fn create_swarm(use_mdns: bool) -> Result<Swarm<AppBehaviour>, Box<dyn
 
     // Create a Swarm to manage peers and events
     let swarm = {
-        let gossipsub_config = gossipsub::Config::default();
+        let gossipsub_config = gossipsub::ConfigBuilder::default()
+            .max_transmit_size(10 * 1024 * 1024) // 10MB
+            .build()
+            .map_err(|msg| std::io::Error::new(std::io::ErrorKind::Other, msg))?;
         let mut gossipsub: gossipsub::Behaviour = gossipsub::Behaviour::new(
             MessageAuthenticity::Signed(local_key.clone()),
             gossipsub_config,

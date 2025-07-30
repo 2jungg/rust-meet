@@ -14,6 +14,20 @@ use std::{
     io::{self, Stdout},
 };
 
+#[derive(Clone, Debug)]
+pub enum FileDownloadState {
+    Downloading,
+    Completed(String), // path
+    Failed,
+}
+
+#[derive(Clone, Debug)]
+pub struct FileDownload {
+    pub file_name: String,
+    pub peer_id: String,
+    pub state: FileDownloadState,
+}
+
 type Terminal = ratatui::Terminal<CrosstermBackend<Stdout>>;
 
 fn draw_ui(frame: &mut Frame, content: impl Widget) {
@@ -26,6 +40,7 @@ pub struct Tui {
     remote_frames: HashMap<String, (String, bool, bool)>,
     listen_addresses: Vec<Multiaddr>,
     pub messages: Vec<String>,
+    pub downloads: Vec<FileDownload>,
     pub input: String,
     pub input_mode: bool,
 }
@@ -42,6 +57,7 @@ impl Tui {
             remote_frames: HashMap::new(),
             listen_addresses: Vec::new(),
             messages: Vec::new(),
+            downloads: Vec::new(),
             input: String::new(),
             input_mode: false,
         })
@@ -72,6 +88,7 @@ impl Tui {
             terminal,
             remote_frames,
             messages,
+            downloads,
             input,
             input_mode,
             ..
@@ -123,28 +140,54 @@ impl Tui {
                 f.render_widget(remote_view, video_chunks[1]);
             }
 
-            let chat_chunks = Layout::default()
+            let right_chunks = Layout::default()
                 .direction(Direction::Vertical)
-                .constraints([Constraint::Min(1), Constraint::Length(3)].as_ref())
+                .constraints(
+                    [
+                        Constraint::Percentage(50),
+                        Constraint::Percentage(40),
+                        Constraint::Length(3),
+                    ]
+                    .as_ref(),
+                )
                 .split(chunks[1]);
 
             let message_items: Vec<ListItem> =
                 messages.iter().map(|m| ListItem::new(m.as_str())).collect();
             let message_list = List::new(message_items)
                 .block(Block::default().borders(Borders::ALL).title("Chat"));
-            f.render_widget(message_list, chat_chunks[0]);
+            f.render_widget(message_list, right_chunks[0]);
+
+            let download_items: Vec<ListItem> = downloads
+                .iter()
+                .map(|d| {
+                    let state_str = match &d.state {
+                        FileDownloadState::Downloading => "Downloading...",
+                        FileDownloadState::Completed(path) => &format!("Done -> {}", path),
+                        FileDownloadState::Failed => "Failed!",
+                    };
+                    let line = format!("{} from {}: {}", d.file_name, d.peer_id, state_str);
+                    ListItem::new(line)
+                })
+                .collect();
+            let download_list = List::new(download_items).block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("File Downloads"),
+            );
+            f.render_widget(download_list, right_chunks[1]);
 
             let input_paragraph = Paragraph::new(input.as_str()).block(
                 Block::default()
                     .borders(Borders::ALL)
                     .title("Input (Enter to send, Esc to exit)"),
             );
-            f.render_widget(input_paragraph, chat_chunks[1]);
+            f.render_widget(input_paragraph, right_chunks[2]);
 
             if *input_mode {
                 f.set_cursor(
-                    chat_chunks[1].x + input.len() as u16 + 1,
-                    chat_chunks[1].y + 1,
+                    right_chunks[2].x + input.len() as u16 + 1,
+                    right_chunks[2].y + 1,
                 );
             }
         })?;

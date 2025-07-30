@@ -13,14 +13,15 @@ use libp2p::{
     Multiaddr,
 };
 use std::error::Error;
+use std::sync::{Arc, Mutex};
 use std::thread;
-use tokio::{sync::mpsc, time::Duration};
+use tokio::{fs, sync::mpsc, time::Duration};
 
 use p2p::{
     AppBehaviourEvent, AudioData, ChatMessage, FileMessage, FrameData, AUDIO_TOPIC, CHAT_TOPIC,
     FILE_TOPIC, VIDEO_TOPIC,
 };
-use tui::Tui;
+use tui::{FileDownload, FileDownloadState, Tui};
 
 use p2p::AppStatus;
 
@@ -37,10 +38,14 @@ enum Args {
     },
 }
 
+use log::LevelFilter;
+use simple_logging;
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    simple_logging::log_to_file("rust-meet.log", LevelFilter::Info)?;
     let args = Args::parse();
-    let mut tui = Tui::new()?;
+    let tui = Arc::new(Mutex::new(Tui::new()?));
     let mut camera = match video::initialize_camera() {
         Ok(camera) => Some(camera),
         Err(_) => None,
@@ -75,6 +80,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let mut tick_interval = tokio::time::interval(Duration::from_millis(50));
     let (key_sender, mut key_receiver) = mpsc::unbounded_channel();
+    let (download_status_sender, mut download_status_receiver) =
+        mpsc::unbounded_channel::<(usize, FileDownloadState)>();
     let mut tui_dirty = true;
     let mut is_audio_muted = false;
     let mut is_video_muted = false;
@@ -95,12 +102,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     loop {
         if tui_dirty {
+            let mut tui_guard = tui.lock().unwrap();
             match app_status {
                 AppStatus::WaitingForPeers => {
-                    tui.draw_waiting_for_peers(&local_peer_id_str)?;
+                    tui_guard.draw_waiting_for_peers(&local_peer_id_str)?;
                 }
                 AppStatus::Joining => {
-                    tui.draw_joining()?;
+                    tui_guard.draw_joining()?;
                 }
                 AppStatus::InCall => {
                     // InCall is handled by the tick interval
@@ -157,24 +165,27 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             }
                         }
                     }
-                    tui.draw(&frame, is_audio_muted, is_video_muted)?;
+                    tui.lock()
+                        .unwrap()
+                        .draw(&frame, is_audio_muted, is_video_muted)?;
                 }
             },
             key_event = key_receiver.recv() => {
                 if let Some(Event::Key(key)) = key_event {
                     if key.kind == KeyEventKind::Press {
-                        if tui.input_mode {
+                        let mut tui_guard = tui.lock().unwrap();
+                        if tui_guard.input_mode {
                             match key.code {
                                 KeyCode::Char(c) => {
-                                    tui.input.push(c);
+                                    tui_guard.input.push(c);
                                     tui_dirty = true;
                                 }
                                 KeyCode::Backspace => {
-                                    tui.input.pop();
+                                    tui_guard.input.pop();
                                     tui_dirty = true;
                                 }
                                 KeyCode::Enter => {
-                                    let message_text: String = tui.input.drain(..).collect();
+                                    let message_text: String = tui_guard.input.drain(..).collect();
                                     let message = ChatMessage {
                                         peer_id: local_peer_id_str.clone(),
                                         message: message_text.clone(),
@@ -187,13 +198,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                         {
                                         }
                                     }
-                                    tui.messages.push(format!("You: {}", message_text));
-                                    tui.input_mode = false;
+                                    tui_guard.messages.push(format!("You: {}", message_text));
+                                    tui_guard.input_mode = false;
                                     tui_dirty = true;
                                 }
                                 KeyCode::Esc => {
-                                    tui.input.clear();
-                                    tui.input_mode = false;
+                                    tui_guard.input.clear();
+                                    tui_guard.input_mode = false;
                                     tui_dirty = true;
                                 }
                                 _ => {}
@@ -205,7 +216,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                     break;
                                 }
                                 KeyCode::Char('i') => {
-                                    tui.input_mode = true;
+                                    tui_guard.input_mode = true;
                                     tui_dirty = true;
                                 }
                                 KeyCode::Char('m') => {
@@ -218,29 +229,36 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 }
                                 KeyCode::Char('f') => {
                                     if let Some(path) = rfd::FileDialog::new().pick_file() {
+                                        log::info!("Picked file: {:?}", path);
                                         if let Ok(content) = std::fs::read(&path) {
                                             let file_name = path
                                                 .file_name()
                                                 .unwrap_or_default()
                                                 .to_string_lossy()
                                                 .to_string();
+                                            log::info!("Sending file: {}", file_name);
                                             let message = FileMessage {
                                                 peer_id: local_peer_id_str.clone(),
                                                 file_name: file_name.clone(),
                                                 content,
                                             };
                                             if let Ok(json) = serde_json::to_string(&message) {
-                                                if swarm
+                                                match swarm
                                                     .behaviour_mut()
                                                     .gossipsub
                                                     .publish(file_topic.clone(), json.as_bytes())
-                                                    .is_ok()
                                                 {
-                                                    tui.messages.push(format!(
-                                                        "You sent a file: {}",
-                                                        file_name
-                                                    ));
-                                                    tui_dirty = true;
+                                                    Ok(_) => {
+                                                        log::info!("File sent successfully.");
+                                                        tui_guard.messages.push(format!(
+                                                            "You sent a file: {}",
+                                                            file_name
+                                                        ));
+                                                        tui_dirty = true;
+                                                    }
+                                                    Err(e) => {
+                                                        log::error!("Failed to send file: {:?}", e);
+                                                    }
                                                 }
                                             }
                                         }
@@ -280,7 +298,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             if let Ok(frame_data) = serde_json::from_slice::<FrameData>(&message.data)
                             {
                                 if frame_data.peer_id != local_peer_id_str {
-                                    tui.update_frame(frame_data);
+                                    tui.lock().unwrap().update_frame(frame_data);
                                     tui_dirty = true;
                                 }
                             }
@@ -299,7 +317,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 if chat_message.peer_id != local_peer_id_str {
                                     let peer_id_short = &chat_message.peer_id
                                         [chat_message.peer_id.len() - 6..];
-                                    tui.messages.push(format!(
+                                    tui.lock().unwrap().messages.push(format!(
                                         "{}: {}",
                                         peer_id_short, chat_message.message
                                     ));
@@ -307,26 +325,57 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 }
                             }
                         } else if topic == FILE_TOPIC {
+                            log::info!("Received file message");
                             if let Ok(file_message) =
                                 serde_json::from_slice::<FileMessage>(&message.data)
                             {
                                 if file_message.peer_id != local_peer_id_str {
-                                    let downloads_path =
-                                        dirs::download_dir().unwrap_or_else(|| ".".into());
-                                    let file_path =
-                                        downloads_path.join(&file_message.file_name);
-                                    if std::fs::write(&file_path, &file_message.content).is_ok()
-                                    {
-                                        let peer_id_short = &file_message.peer_id
-                                            [file_message.peer_id.len() - 6..];
-                                        tui.messages.push(format!(
-                                            "{} sent a file: {} (saved to {})",
-                                            peer_id_short,
-                                            file_message.file_name,
-                                            file_path.to_string_lossy()
-                                        ));
-                                        tui_dirty = true;
-                                    }
+                                    log::info!("File message is from another peer. Processing.");
+                                    let download = FileDownload {
+                                        file_name: file_message.file_name.clone(),
+                                        peer_id: file_message.peer_id.clone(),
+                                        state: FileDownloadState::Downloading,
+                                    };
+                                    let download_index = {
+                                        let mut tui_guard = tui.lock().unwrap();
+                                        tui_guard.downloads.push(download);
+                                        tui_guard.downloads.len() - 1
+                                    };
+
+                                    let status_sender = download_status_sender.clone();
+                                    tokio::spawn(async move {
+                                        log::info!("Starting file save for '{}'", &file_message.file_name);
+                                        let downloads_path =
+                                            dirs::download_dir().unwrap_or_else(|| ".".into());
+                                        if !downloads_path.exists() {
+                                            if let Err(e) = fs::create_dir_all(&downloads_path).await {
+                                                log::error!("Failed to create downloads directory: {}", e);
+                                            }
+                                        }
+                                        let file_path =
+                                            downloads_path.join(&file_message.file_name);
+                                        let new_state = match fs::write(
+                                            &file_path,
+                                            &file_message.content,
+                                        )
+                                        .await
+                                        {
+                                            Ok(_) => {
+                                                log::info!("File '{}' saved successfully to {:?}", &file_message.file_name, &file_path);
+                                                FileDownloadState::Completed(
+                                                file_path.to_string_lossy().into_owned(),
+                                            )},
+                                            Err(e) => {
+                                                log::error!("Failed to save file '{}': {}", &file_message.file_name, e);
+                                                FileDownloadState::Failed
+                                            },
+                                        };
+                                        if status_sender.send((download_index, new_state)).is_err() {
+                                            log::error!("Failed to send download status update");
+                                        }
+                                    });
+
+                                    tui_dirty = true;
                                 }
                             }
                         } else if topic == p2p::CONTROL_TOPIC {
@@ -341,10 +390,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     }
                     SwarmEvent::NewListenAddr { address, .. } => {
                         let listen_addr = address.with(Protocol::P2p(local_peer_id));
-                        tui.add_listen_address(listen_addr);
+                        tui.lock().unwrap().add_listen_address(listen_addr);
                         tui_dirty = true;
                     }
                     _ => {}
+                }
+            },
+            Some((download_index, new_state)) = download_status_receiver.recv() => {
+                log::info!("Received download status update for index {}: {:?}", download_index, new_state);
+                let mut tui_guard = tui.lock().unwrap();
+                if let Some(d) = tui_guard.downloads.get_mut(download_index) {
+                    d.state = new_state;
+                    tui_dirty = true;
                 }
             }
         }
