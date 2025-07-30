@@ -4,7 +4,7 @@ mod tui;
 mod video;
 
 use clap::Parser;
-use crossterm::event::{self, Event, KeyCode};
+use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use libp2p::{
     futures::StreamExt,
     gossipsub::{self, IdentTopic as Topic},
@@ -147,51 +147,54 @@ async fn main() -> Result<(), Box<dyn Error>> {
             },
             key_event = key_receiver.recv() => {
                 if let Some(Event::Key(key)) = key_event {
-                    if tui.input_mode {
-                        match key.code {
-                            KeyCode::Char(c) => {
-                                tui.input.push(c);
-                                tui_dirty = true;
-                            }
-                            KeyCode::Backspace => {
-                                tui.input.pop();
-                                tui_dirty = true;
-                            }
-                            KeyCode::Enter => {
-                                let message = ChatMessage {
-                                    peer_id: local_peer_id_str.clone(),
-                                    message: tui.input.drain(..).collect(),
-                                };
-                                if let Ok(json) = serde_json::to_string(&message) {
-                                    if let Err(_e) = swarm
-                                        .behaviour_mut()
-                                        .gossipsub
-                                        .publish(chat_topic.clone(), json.as_bytes())
-                                    {
-                                    }
+                    if key.kind == KeyEventKind::Press {
+                        if tui.input_mode {
+                            match key.code {
+                                KeyCode::Char(c) => {
+                                    tui.input.push(c);
+                                    tui_dirty = true;
                                 }
-                                tui.messages.push(format!("You: {}", message.message));
-                                tui.input_mode = false;
-                                tui_dirty = true;
+                                KeyCode::Backspace => {
+                                    tui.input.pop();
+                                    tui_dirty = true;
+                                }
+                                KeyCode::Enter => {
+                                    let message_text: String = tui.input.drain(..).collect();
+                                    let message = ChatMessage {
+                                        peer_id: local_peer_id_str.clone(),
+                                        message: message_text.clone(),
+                                    };
+                                    if let Ok(json) = serde_json::to_string(&message) {
+                                        if let Err(_e) = swarm
+                                            .behaviour_mut()
+                                            .gossipsub
+                                            .publish(chat_topic.clone(), json.as_bytes())
+                                        {
+                                        }
+                                    }
+                                    tui.messages.push(format!("You: {}", message_text));
+                                    tui.input_mode = false;
+                                    tui_dirty = true;
+                                }
+                                KeyCode::Esc => {
+                                    tui.input.clear();
+                                    tui.input_mode = false;
+                                    tui_dirty = true;
+                                }
+                                _ => {}
                             }
-                            KeyCode::Esc => {
-                                tui.input.clear();
-                                tui.input_mode = false;
-                                tui_dirty = true;
+                        } else {
+                            match key.code {
+                                KeyCode::Char('q') => {
+                                    p2p::end_call(&mut swarm)?;
+                                    break;
+                                }
+                                KeyCode::Char('i') => {
+                                    tui.input_mode = true;
+                                    tui_dirty = true;
+                                }
+                                _ => {}
                             }
-                            _ => {}
-                        }
-                    } else {
-                        match key.code {
-                            KeyCode::Char('q') => {
-                                p2p::end_call(&mut swarm)?;
-                                break;
-                            }
-                            KeyCode::Char('i') => {
-                                tui.input_mode = true;
-                                tui_dirty = true;
-                            }
-                            _ => {}
                         }
                     }
                 } else if key_event.is_none() {
@@ -238,9 +241,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 serde_json::from_slice::<ChatMessage>(&message.data)
                             {
                                 if chat_message.peer_id != local_peer_id_str {
+                                    let peer_id_short = &chat_message.peer_id
+                                        [chat_message.peer_id.len() - 6..];
                                     tui.messages.push(format!(
                                         "{}: {}",
-                                        chat_message.peer_id, chat_message.message
+                                        peer_id_short, chat_message.message
                                     ));
                                     tui_dirty = true;
                                 }
