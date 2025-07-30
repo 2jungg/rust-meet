@@ -212,7 +212,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         } else {
                             match key.code {
                                 KeyCode::Char('q') => {
-                                    p2p::end_call(&mut swarm)?;
+                                    if app_status != AppStatus::WaitingForPeers {
+                                        p2p::end_call(&mut swarm)?;
+                                    }
                                     break;
                                 }
                                 KeyCode::Char('i') => {
