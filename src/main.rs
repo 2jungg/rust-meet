@@ -16,7 +16,9 @@ use std::error::Error;
 use std::thread;
 use tokio::{sync::mpsc, time::Duration};
 
-use p2p::{AppBehaviourEvent, AudioData, FrameData, AUDIO_TOPIC, VIDEO_TOPIC};
+use p2p::{
+    AppBehaviourEvent, AudioData, ChatMessage, FrameData, AUDIO_TOPIC, CHAT_TOPIC, VIDEO_TOPIC,
+};
 use tui::Tui;
 
 use p2p::AppStatus;
@@ -65,6 +67,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let video_topic = Topic::new(VIDEO_TOPIC);
     let audio_topic = Topic::new(AUDIO_TOPIC);
+    let chat_topic = Topic::new(CHAT_TOPIC);
     let local_peer_id = *swarm.local_peer_id();
     let local_peer_id_str = local_peer_id.to_string();
 
@@ -143,13 +146,56 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 }
             },
             key_event = key_receiver.recv() => {
-                match key_event {
-                    Some(Event::Key(key)) if key.code == KeyCode::Char('q') => {
-                        p2p::end_call(&mut swarm)?;
-                        break;
+                if let Some(Event::Key(key)) = key_event {
+                    if tui.input_mode {
+                        match key.code {
+                            KeyCode::Char(c) => {
+                                tui.input.push(c);
+                                tui_dirty = true;
+                            }
+                            KeyCode::Backspace => {
+                                tui.input.pop();
+                                tui_dirty = true;
+                            }
+                            KeyCode::Enter => {
+                                let message = ChatMessage {
+                                    peer_id: local_peer_id_str.clone(),
+                                    message: tui.input.drain(..).collect(),
+                                };
+                                if let Ok(json) = serde_json::to_string(&message) {
+                                    if let Err(_e) = swarm
+                                        .behaviour_mut()
+                                        .gossipsub
+                                        .publish(chat_topic.clone(), json.as_bytes())
+                                    {
+                                    }
+                                }
+                                tui.messages.push(format!("You: {}", message.message));
+                                tui.input_mode = false;
+                                tui_dirty = true;
+                            }
+                            KeyCode::Esc => {
+                                tui.input.clear();
+                                tui.input_mode = false;
+                                tui_dirty = true;
+                            }
+                            _ => {}
+                        }
+                    } else {
+                        match key.code {
+                            KeyCode::Char('q') => {
+                                p2p::end_call(&mut swarm)?;
+                                break;
+                            }
+                            KeyCode::Char('i') => {
+                                tui.input_mode = true;
+                                tui_dirty = true;
+                            }
+                            _ => {}
+                        }
                     }
-                    Some(_) => {}
-                    None => break,
+                } else if key_event.is_none() {
+                    break;
                 }
             },
             event = swarm.select_next_some() => {
@@ -185,6 +231,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             {
                                 if audio_data.peer_id != local_peer_id_str {
                                     let _ = app_audio_sender.send(audio_data.data);
+                                }
+                            }
+                        } else if topic == CHAT_TOPIC {
+                            if let Ok(chat_message) =
+                                serde_json::from_slice::<ChatMessage>(&message.data)
+                            {
+                                if chat_message.peer_id != local_peer_id_str {
+                                    tui.messages.push(format!(
+                                        "{}: {}",
+                                        chat_message.peer_id, chat_message.message
+                                    ));
+                                    tui_dirty = true;
                                 }
                             }
                         } else if topic == p2p::CONTROL_TOPIC {

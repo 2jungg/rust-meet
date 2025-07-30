@@ -7,7 +7,7 @@ use crossterm::{
 use libp2p::Multiaddr;
 use ratatui::{
     prelude::*,
-    widgets::{Block, Borders, Paragraph},
+    widgets::{Block, Borders, List, ListItem, Paragraph},
 };
 use std::{
     collections::HashMap,
@@ -25,6 +25,9 @@ pub struct Tui {
     terminal: Terminal,
     remote_frames: HashMap<String, String>,
     listen_addresses: Vec<Multiaddr>,
+    pub messages: Vec<String>,
+    pub input: String,
+    pub input_mode: bool,
 }
 
 impl Tui {
@@ -38,6 +41,9 @@ impl Tui {
             terminal,
             remote_frames: HashMap::new(),
             listen_addresses: Vec::new(),
+            messages: Vec::new(),
+            input: String::new(),
+            input_mode: false,
         })
     }
 
@@ -54,20 +60,28 @@ impl Tui {
         let Tui {
             terminal,
             remote_frames,
+            messages,
+            input,
+            input_mode,
             ..
         } = self;
         terminal.draw(|f| {
             let chunks = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Percentage(70), Constraint::Percentage(30)].as_ref())
+                .split(f.size());
+
+            let video_chunks = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([Constraint::Percentage(50), Constraint::Percentage(50)].as_ref())
-                .split(f.size());
+                .split(chunks[0]);
 
             let self_view = Paragraph::new(self_frame).block(
                 Block::default()
-                    .title("My View (Press 'q' to quit)")
+                    .title("My View (Press 'q' to quit, 'i' to chat)")
                     .borders(Borders::ALL),
             );
-            f.render_widget(self_view, chunks[0]);
+            f.render_widget(self_view, video_chunks[0]);
 
             if !remote_frames.is_empty() {
                 let remote_frame_text = remote_frames.values().next().unwrap().clone();
@@ -77,11 +91,36 @@ impl Tui {
                         .title(format!("Peer: {}", remote_peer_id))
                         .borders(Borders::ALL),
                 );
-                f.render_widget(remote_view, chunks[1]);
+                f.render_widget(remote_view, video_chunks[1]);
             } else {
                 let remote_view = Paragraph::new("Waiting for remote frame...")
                     .block(Block::default().title("Remote View").borders(Borders::ALL));
-                f.render_widget(remote_view, chunks[1]);
+                f.render_widget(remote_view, video_chunks[1]);
+            }
+
+            let chat_chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Min(1), Constraint::Length(3)].as_ref())
+                .split(chunks[1]);
+
+            let message_items: Vec<ListItem> =
+                messages.iter().map(|m| ListItem::new(m.as_str())).collect();
+            let message_list = List::new(message_items)
+                .block(Block::default().borders(Borders::ALL).title("Chat"));
+            f.render_widget(message_list, chat_chunks[0]);
+
+            let input_paragraph = Paragraph::new(input.as_str()).block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("Input (Enter to send, Esc to exit)"),
+            );
+            f.render_widget(input_paragraph, chat_chunks[1]);
+
+            if *input_mode {
+                f.set_cursor(
+                    chat_chunks[1].x + input.len() as u16 + 1,
+                    chat_chunks[1].y + 1,
+                );
             }
         })?;
         Ok(())

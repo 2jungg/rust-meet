@@ -9,6 +9,7 @@ use std::error::Error;
 
 pub const VIDEO_TOPIC: &str = "video";
 pub const AUDIO_TOPIC: &str = "audio";
+pub const CHAT_TOPIC: &str = "chat";
 pub const CONTROL_TOPIC: &str = "control";
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -33,6 +34,12 @@ pub struct FrameData {
 pub struct AudioData {
     pub peer_id: String,
     pub data: Vec<f32>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ChatMessage {
+    pub peer_id: String,
+    pub message: String,
 }
 
 // The network behaviour combines multiple protocols.
@@ -70,6 +77,7 @@ pub async fn create_swarm(use_mdns: bool) -> Result<Swarm<AppBehaviour>, Box<dyn
     // Create a Gossipsub topic
     let video_topic = Topic::new(VIDEO_TOPIC);
     let audio_topic = Topic::new(AUDIO_TOPIC);
+    let chat_topic = Topic::new(CHAT_TOPIC);
     let control_topic = Topic::new(CONTROL_TOPIC);
 
     // Create a Swarm to manage peers and events
@@ -82,6 +90,7 @@ pub async fn create_swarm(use_mdns: bool) -> Result<Swarm<AppBehaviour>, Box<dyn
         .map_err(|msg| std::io::Error::new(std::io::ErrorKind::Other, msg))?;
         gossipsub.subscribe(&video_topic)?;
         gossipsub.subscribe(&audio_topic)?;
+        gossipsub.subscribe(&chat_topic)?;
         gossipsub.subscribe(&control_topic)?;
 
         let mdns = if use_mdns {
