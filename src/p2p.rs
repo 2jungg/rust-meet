@@ -28,6 +28,8 @@ pub enum AppStatus {
 pub struct FrameData {
     pub peer_id: String,
     pub frame: String, // ASCII frame
+    pub is_audio_muted: bool,
+    pub is_video_muted: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

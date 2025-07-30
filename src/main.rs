@@ -74,6 +74,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut tick_interval = tokio::time::interval(Duration::from_millis(50));
     let (key_sender, mut key_receiver) = mpsc::unbounded_channel();
     let mut tui_dirty = true;
+    let mut is_audio_muted = false;
+    let mut is_video_muted = false;
 
     thread::spawn(move || {
         loop {
@@ -109,40 +111,51 @@ async fn main() -> Result<(), Box<dyn Error>> {
             _ = tick_interval.tick() => {
                 if app_status == AppStatus::InCall {
                     // Process camera frame
-                    let frame = if let Some(ref mut cam) = camera {
-                        video::capture_and_process_frame(cam)
-                            .unwrap_or_else(|_| video::create_no_camera_frame().unwrap())
+                    let frame = if !is_video_muted {
+                        if let Some(ref mut cam) = camera {
+                            video::capture_and_process_frame(cam)
+                                .unwrap_or_else(|_| video::create_no_camera_frame().unwrap())
+                        } else {
+                            video::create_no_camera_frame().unwrap()
+                        }
                     } else {
                         video::create_no_camera_frame().unwrap()
                     };
 
+                    // Send frame data along with mute status
                     let frame_data = FrameData {
                         peer_id: local_peer_id_str.clone(),
                         frame: frame.clone(),
+                        is_audio_muted,
+                        is_video_muted,
                     };
                     if let Ok(json) = serde_json::to_string(&frame_data) {
                         if let Err(_e) = swarm
                             .behaviour_mut()
                             .gossipsub
-                            .publish(video_topic.clone(), json.as_bytes()) {
+                            .publish(video_topic.clone(), json.as_bytes())
+                        {
                         }
                     }
 
-                    // Process audio
-                    if let Ok(audio_data) = app_audio_receiver.try_recv() {
-                        let audio_data_p2p = AudioData {
-                            peer_id: local_peer_id_str.clone(),
-                            data: audio_data,
-                        };
-                        if let Ok(json) = serde_json::to_string(&audio_data_p2p) {
-                            if let Err(_e) = swarm
-                                .behaviour_mut()
-                                .gossipsub
-                                .publish(audio_topic.clone(), json.as_bytes()) {
+                    // Process and send audio if not muted
+                    if !is_audio_muted {
+                        if let Ok(audio_data) = app_audio_receiver.try_recv() {
+                            let audio_data_p2p = AudioData {
+                                peer_id: local_peer_id_str.clone(),
+                                data: audio_data,
+                            };
+                            if let Ok(json) = serde_json::to_string(&audio_data_p2p) {
+                                if let Err(_e) = swarm
+                                    .behaviour_mut()
+                                    .gossipsub
+                                    .publish(audio_topic.clone(), json.as_bytes())
+                                {
+                                }
                             }
                         }
                     }
-                    tui.draw(&frame)?;
+                    tui.draw(&frame, is_audio_muted, is_video_muted)?;
                 }
             },
             key_event = key_receiver.recv() => {
@@ -191,6 +204,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 }
                                 KeyCode::Char('i') => {
                                     tui.input_mode = true;
+                                    tui_dirty = true;
+                                }
+                                KeyCode::Char('m') => {
+                                    is_audio_muted = !is_audio_muted;
+                                    tui_dirty = true;
+                                }
+                                KeyCode::Char('v') => {
+                                    is_video_muted = !is_video_muted;
                                     tui_dirty = true;
                                 }
                                 _ => {}

@@ -23,7 +23,7 @@ fn draw_ui(frame: &mut Frame, content: impl Widget) {
 
 pub struct Tui {
     terminal: Terminal,
-    remote_frames: HashMap<String, String>,
+    remote_frames: HashMap<String, (String, bool, bool)>,
     listen_addresses: Vec<Multiaddr>,
     pub messages: Vec<String>,
     pub input: String,
@@ -52,11 +52,22 @@ impl Tui {
     }
 
     pub fn update_frame(&mut self, frame_data: FrameData) {
-        self.remote_frames
-            .insert(frame_data.peer_id, frame_data.frame);
+        self.remote_frames.insert(
+            frame_data.peer_id,
+            (
+                frame_data.frame,
+                frame_data.is_audio_muted,
+                frame_data.is_video_muted,
+            ),
+        );
     }
 
-    pub fn draw(&mut self, self_frame: &str) -> io::Result<()> {
+    pub fn draw(
+        &mut self,
+        self_frame: &str,
+        is_audio_muted: bool,
+        is_video_muted: bool,
+    ) -> io::Result<()> {
         let Tui {
             terminal,
             remote_frames,
@@ -76,21 +87,35 @@ impl Tui {
                 .constraints([Constraint::Percentage(50), Constraint::Percentage(50)].as_ref())
                 .split(chunks[0]);
 
-            let self_view = Paragraph::new(self_frame).block(
-                Block::default()
-                    .title("My View (Press 'q' to quit, 'i' to chat)")
-                    .borders(Borders::ALL),
+            let audio_status = if is_audio_muted { " (Muted)" } else { "" };
+            let video_status = if is_video_muted { " (Video Off)" } else { "" };
+            let title = format!(
+                "My View (q: quit, i: chat, m: mute audio{}, v: mute video{})",
+                audio_status, video_status
             );
+
+            let self_view = Paragraph::new(self_frame)
+                .block(Block::default().title(title).borders(Borders::ALL));
             f.render_widget(self_view, video_chunks[0]);
 
             if !remote_frames.is_empty() {
-                let remote_frame_text = remote_frames.values().next().unwrap().clone();
+                let (remote_frame_text, is_audio_muted, is_video_muted) =
+                    remote_frames.values().next().unwrap().clone();
                 let remote_peer_id = remote_frames.keys().next().unwrap().clone();
-                let remote_view = Paragraph::new(remote_frame_text).block(
-                    Block::default()
-                        .title(format!("Peer: {}", remote_peer_id))
-                        .borders(Borders::ALL),
+
+                let audio_status = if is_audio_muted { " (Muted)" } else { "" };
+                let video_status = if is_video_muted { " (Video Off)" } else { "" };
+                let title = format!(
+                    "Peer: {} (Audio: {}{}, Video: {}{})",
+                    remote_peer_id,
+                    if is_audio_muted { "Off" } else { "On" },
+                    audio_status,
+                    if is_video_muted { "Off" } else { "On" },
+                    video_status
                 );
+
+                let remote_view = Paragraph::new(remote_frame_text)
+                    .block(Block::default().title(title).borders(Borders::ALL));
                 f.render_widget(remote_view, video_chunks[1]);
             } else {
                 let remote_view = Paragraph::new("Waiting for remote frame...")
