@@ -11,6 +11,7 @@ pub const VIDEO_TOPIC: &str = "video";
 pub const AUDIO_TOPIC: &str = "audio";
 pub const CHAT_TOPIC: &str = "chat";
 pub const CONTROL_TOPIC: &str = "control";
+pub const FILE_TOPIC: &str = "file";
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum ControlMessage {
@@ -42,6 +43,13 @@ pub struct AudioData {
 pub struct ChatMessage {
     pub peer_id: String,
     pub message: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct FileMessage {
+    pub peer_id: String,
+    pub file_name: String,
+    pub content: Vec<u8>,
 }
 
 // The network behaviour combines multiple protocols.
@@ -81,6 +89,7 @@ pub async fn create_swarm(use_mdns: bool) -> Result<Swarm<AppBehaviour>, Box<dyn
     let audio_topic = Topic::new(AUDIO_TOPIC);
     let chat_topic = Topic::new(CHAT_TOPIC);
     let control_topic = Topic::new(CONTROL_TOPIC);
+    let file_topic = Topic::new(FILE_TOPIC);
 
     // Create a Swarm to manage peers and events
     let swarm = {
@@ -94,6 +103,7 @@ pub async fn create_swarm(use_mdns: bool) -> Result<Swarm<AppBehaviour>, Box<dyn
         gossipsub.subscribe(&audio_topic)?;
         gossipsub.subscribe(&chat_topic)?;
         gossipsub.subscribe(&control_topic)?;
+        gossipsub.subscribe(&file_topic)?;
 
         let mdns = if use_mdns {
             Some(mdns::tokio::Behaviour::new(

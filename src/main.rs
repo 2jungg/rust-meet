@@ -17,7 +17,8 @@ use std::thread;
 use tokio::{sync::mpsc, time::Duration};
 
 use p2p::{
-    AppBehaviourEvent, AudioData, ChatMessage, FrameData, AUDIO_TOPIC, CHAT_TOPIC, VIDEO_TOPIC,
+    AppBehaviourEvent, AudioData, ChatMessage, FileMessage, FrameData, AUDIO_TOPIC, CHAT_TOPIC,
+    FILE_TOPIC, VIDEO_TOPIC,
 };
 use tui::Tui;
 
@@ -68,6 +69,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let video_topic = Topic::new(VIDEO_TOPIC);
     let audio_topic = Topic::new(AUDIO_TOPIC);
     let chat_topic = Topic::new(CHAT_TOPIC);
+    let file_topic = Topic::new(FILE_TOPIC);
     let local_peer_id = *swarm.local_peer_id();
     let local_peer_id_str = local_peer_id.to_string();
 
@@ -214,6 +216,36 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                     is_video_muted = !is_video_muted;
                                     tui_dirty = true;
                                 }
+                                KeyCode::Char('f') => {
+                                    if let Some(path) = rfd::FileDialog::new().pick_file() {
+                                        if let Ok(content) = std::fs::read(&path) {
+                                            let file_name = path
+                                                .file_name()
+                                                .unwrap_or_default()
+                                                .to_string_lossy()
+                                                .to_string();
+                                            let message = FileMessage {
+                                                peer_id: local_peer_id_str.clone(),
+                                                file_name: file_name.clone(),
+                                                content,
+                                            };
+                                            if let Ok(json) = serde_json::to_string(&message) {
+                                                if swarm
+                                                    .behaviour_mut()
+                                                    .gossipsub
+                                                    .publish(file_topic.clone(), json.as_bytes())
+                                                    .is_ok()
+                                                {
+                                                    tui.messages.push(format!(
+                                                        "You sent a file: {}",
+                                                        file_name
+                                                    ));
+                                                    tui_dirty = true;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                                 _ => {}
                             }
                         }
@@ -272,6 +304,29 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                         peer_id_short, chat_message.message
                                     ));
                                     tui_dirty = true;
+                                }
+                            }
+                        } else if topic == FILE_TOPIC {
+                            if let Ok(file_message) =
+                                serde_json::from_slice::<FileMessage>(&message.data)
+                            {
+                                if file_message.peer_id != local_peer_id_str {
+                                    let downloads_path =
+                                        dirs::download_dir().unwrap_or_else(|| ".".into());
+                                    let file_path =
+                                        downloads_path.join(&file_message.file_name);
+                                    if std::fs::write(&file_path, &file_message.content).is_ok()
+                                    {
+                                        let peer_id_short = &file_message.peer_id
+                                            [file_message.peer_id.len() - 6..];
+                                        tui.messages.push(format!(
+                                            "{} sent a file: {} (saved to {})",
+                                            peer_id_short,
+                                            file_message.file_name,
+                                            file_path.to_string_lossy()
+                                        ));
+                                        tui_dirty = true;
+                                    }
                                 }
                             }
                         } else if topic == p2p::CONTROL_TOPIC {

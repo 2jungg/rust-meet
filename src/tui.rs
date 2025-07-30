@@ -90,7 +90,7 @@ impl Tui {
             let audio_status = if is_audio_muted { " (Muted)" } else { "" };
             let video_status = if is_video_muted { " (Video Off)" } else { "" };
             let title = format!(
-                "My View (q: quit, i: chat, m: mute audio{}, v: mute video{})",
+                "My View (q: quit, i: chat, m: mute audio{}, v: mute video{}, f: send file)",
                 audio_status, video_status
             );
 
