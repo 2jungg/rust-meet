@@ -82,7 +82,6 @@ pub async fn create_swarm(use_mdns: bool) -> Result<Swarm<AppBehaviour>, Box<dyn
     // Create a random PeerId
     let local_key = identity::Keypair::generate_ed25519();
     let local_peer_id = PeerId::from(local_key.public());
-    println!("Local peer id: {}", local_peer_id);
 
     // Create a Gossipsub topic
     let video_topic = Topic::new(VIDEO_TOPIC);

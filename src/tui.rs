@@ -30,11 +30,6 @@ pub struct FileDownload {
 
 type Terminal = ratatui::Terminal<CrosstermBackend<Stdout>>;
 
-fn draw_ui(frame: &mut Frame, content: impl Widget) {
-    let size = frame.size();
-    frame.render_widget(content, size);
-}
-
 pub struct Tui {
     terminal: Terminal,
     remote_frames: HashMap<String, (String, bool, bool)>,
@@ -200,19 +195,75 @@ impl Tui {
             listen_addresses,
             ..
         } = self;
-        let listen_addresses_str = listen_addresses
+        let listen_addresses_items: Vec<ListItem> = listen_addresses
             .iter()
-            .map(|addr| format!("  {}", addr))
-            .collect::<Vec<_>>()
-            .join("\n");
+            .map(|addr| ListItem::new(Span::raw(addr.to_string())))
+            .collect();
+
         terminal.draw(|f| {
-            let text = format!(
-                "Waiting for peers to join...\n\nYour Peer ID: {}\n\nListening on:\n{}",
-                local_peer_id, listen_addresses_str
-            );
-            let paragraph =
-                Paragraph::new(text).block(Block::default().title("Status").borders(Borders::ALL));
-            draw_ui(f, paragraph);
+            let size = f.size();
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints(
+                    [
+                        Constraint::Percentage(30),
+                        Constraint::Percentage(40),
+                        Constraint::Percentage(30),
+                    ]
+                    .as_ref(),
+                )
+                .split(size);
+
+            let title = Paragraph::new(Text::styled(
+                "Rust Meet",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ))
+            .alignment(Alignment::Center);
+            f.render_widget(title, chunks[0]);
+
+            let inner_chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Length(3), Constraint::Min(5)].as_ref())
+                .margin(1)
+                .split(chunks[1]);
+
+            let block = Block::default()
+                .title("Waiting for Peers")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Yellow));
+            f.render_widget(block.clone(), chunks[1]);
+
+            let peer_id_text = Text::from(vec![Line::from(vec![
+                Span::styled("Your Peer ID: ", Style::default().fg(Color::White)),
+                Span::styled(
+                    local_peer_id,
+                    Style::default()
+                        .fg(Color::Green)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ])]);
+            let peer_id_paragraph = Paragraph::new(peer_id_text).alignment(Alignment::Center);
+            f.render_widget(peer_id_paragraph, inner_chunks[0]);
+
+            let listen_list = List::new(listen_addresses_items)
+                .block(
+                    Block::default()
+                        .title("Listening on")
+                        .borders(Borders::NONE),
+                )
+                .style(Style::default().fg(Color::White))
+                .highlight_style(Style::default().add_modifier(Modifier::ITALIC))
+                .highlight_symbol(">> ");
+            f.render_widget(listen_list, inner_chunks[1]);
+
+            let footer = Paragraph::new(Text::styled(
+                "Users can join using your Peer ID.",
+                Style::default().fg(Color::Gray),
+            ))
+            .alignment(Alignment::Center);
+            f.render_widget(footer, chunks[2]);
         })?;
         Ok(())
     }
@@ -220,9 +271,31 @@ impl Tui {
     pub fn draw_joining(&mut self) -> io::Result<()> {
         let Tui { terminal, .. } = self;
         terminal.draw(|f| {
-            let paragraph = Paragraph::new("Joining room...")
-                .block(Block::default().title("Status").borders(Borders::ALL));
-            draw_ui(f, paragraph);
+            let size = f.size();
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints(
+                    [
+                        Constraint::Percentage(45),
+                        Constraint::Percentage(10),
+                        Constraint::Percentage(45),
+                    ]
+                    .as_ref(),
+                )
+                .split(size);
+
+            let text = Text::styled(
+                "Joining room...",
+                Style::default()
+                    .fg(Color::LightCyan)
+                    .add_modifier(Modifier::BOLD),
+            );
+            let paragraph = Paragraph::new(text).alignment(Alignment::Center).block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Color::Yellow)),
+            );
+            f.render_widget(paragraph, chunks[1]);
         })?;
         Ok(())
     }
