@@ -211,7 +211,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         // Not used in this context
                     }
                     SwarmEvent::ConnectionClosed { .. } => {
-                        // Handle disconnection if necessary
+                        // Attempt to notify other peers, but don't error out if it fails
+                        // (e.g. if we are the last peer).
+                        let _ = p2p::end_call(&mut swarm);
+                        break;
                     }
                     SwarmEvent::IncomingConnectionError { .. } => {
                         // Handle error
