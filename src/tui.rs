@@ -276,25 +276,33 @@ impl Tui {
                 .direction(Direction::Vertical)
                 .constraints(
                     [
-                        Constraint::Percentage(45),
-                        Constraint::Percentage(10),
-                        Constraint::Percentage(45),
+                        Constraint::Percentage(40),
+                        Constraint::Length(7),
+                        Constraint::Percentage(40),
                     ]
                     .as_ref(),
                 )
                 .split(size);
 
-            let text = Text::styled(
-                "Joining room...",
-                Style::default()
-                    .fg(Color::LightCyan)
-                    .add_modifier(Modifier::BOLD),
-            );
-            let paragraph = Paragraph::new(text).alignment(Alignment::Center).block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::Yellow)),
-            );
+            let text = Text::from(vec![
+                Line::from(""),
+                Line::from("Joining room..."),
+                Line::from(""),
+                Line::from("Press 'q' to quit (Timeout in 10 seconds)"),
+                Line::from(""),
+            ]);
+            let paragraph = Paragraph::new(text)
+                .style(
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                )
+                .alignment(Alignment::Center)
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .border_style(Style::default().fg(Color::Yellow)),
+                );
             f.render_widget(paragraph, chunks[1]);
         })?;
         Ok(())

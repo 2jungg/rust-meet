@@ -86,6 +86,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut is_audio_muted = false;
     let mut is_video_muted = false;
 
+    let mut join_timeout = if app_status == AppStatus::Joining {
+        Some(Box::pin(tokio::time::sleep(Duration::from_secs(10))))
+    } else {
+        None
+    };
+
     thread::spawn(move || {
         loop {
             match event::read() {
@@ -118,6 +124,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
 
         tokio::select! {
+            _ = async { join_timeout.as_mut().unwrap().await }, if join_timeout.is_some() => {
+                // Timeout occurred while joining
+                break;
+            },
             _ = tick_interval.tick() => {
                 if app_status == AppStatus::InCall {
                     // Process camera frame
@@ -212,6 +222,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         } else {
                             match key.code {
                                 KeyCode::Char('q') => {
+                                    if app_status == AppStatus::Joining {
+                                        break;
+                                    }
                                     if app_status != AppStatus::WaitingForPeers {
                                         p2p::end_call(&mut swarm)?;
                                     }
@@ -278,6 +291,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 match event {
                     SwarmEvent::ConnectionEstablished { .. } => {
                         app_status = AppStatus::InCall;
+                        join_timeout = None;
                         tui_dirty = true;
                     }
                     SwarmEvent::Dialing { .. } => {
